@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+/runs/
+/python/writer_log.jsonl
+/python/observer_log.jsonl

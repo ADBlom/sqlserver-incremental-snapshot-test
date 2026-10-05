@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  mssql-node1:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-node1
+    hostname: mssql-node1
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_ENABLE_HADR: "1"
+    ports:
+      - "14331:1433"
+    networks:
+      agnet:
+        aliases: [mssql-node1]
+    volumes:
+      - node1-data:/var/opt/mssql
+
+  mssql-node2:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-node2
+    hostname: mssql-node2
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_ENABLE_HADR: "1"
+    ports:
+      - "14332:1433"
+    networks:
+      agnet:
+        aliases: [mssql-node2]
+    volumes:
+      - node2-data:/var/opt/mssql
+
+networks:
+  agnet:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
