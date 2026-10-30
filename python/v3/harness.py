@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pyodbc
 
-from common import add_conn_args, connect, fetch_lsn, fetch_pos
+from common import add_conn_args, connect, fetch_lsn, fetch_pos, fetch_replica
 
 OBSERVER_MODES = ("pre", "in_first", "snap_first")
 CHAOS_EVENTS = ("suspend_resume", "capture_restart", "capture_retune",
@@ -228,6 +228,7 @@ def observe_once(cur, mode, n_ids, rng, jitter):
     try:
         cur.execute("SELECT id, version FROM dbo.hot")
         rows = cur.fetchall()
+        replica_chunk = fetch_replica(cur)
         l_in = fetch_lsn(cur)
         cur.execute("SELECT COUNT(*), COALESCE(SUM(version), 0) FROM dbo.hot")
         cnt, sm = cur.fetchone()
@@ -244,6 +245,8 @@ def observe_once(cur, mode, n_ids, rng, jitter):
             "l_low": l_low, "l_in": l_in, "l_high": p1["l"],
             "d_pre_c": p0["dc"], "d_pre_r": p0["dr"],
             "d_post_c": p1["dc"], "d_post_r": p1["dr"],
+            "replica_pre": p0["replica"], "replica_chunk": replica_chunk,
+            "replica_post": p1["replica"],
             "cnt": cnt, "sum": sm, "v": v}
 
 
@@ -288,7 +291,8 @@ def watcher_thread(args, stop, outdir):
                 t = time.monotonic()
                 p = fetch_pos(cur)
                 tup = (p["l"], p["dc"], p["dr"])
-                last_rec = {"t": t, "l": p["l"], "dc": p["dc"], "dr": p["dr"]}
+                last_rec = {"t": t, "l": p["l"], "dc": p["dc"], "dr": p["dr"],
+                            "replica": p["replica"]}
                 if tup != last or t - last_write > 2.0:
                     jl(f, last_rec)
                     last, last_write = tup, t
@@ -450,7 +454,7 @@ def preflight(args):
             cur.execute("COMMIT")
             pos = fetch_pos(cur)
             print(f"[preflight] secondary positions (binary-LSN hex): cdc_max={pos['l']} "
-                  f"last_commit={pos['dc']} last_redone={pos['dr']}")
+                  f"last_commit={pos['dc']} last_redone={pos['dr']} replica={pos['replica']}")
             if pos["dc"] is None:
                 raise SystemExit("last_commit_lsn is NULL on the secondary; the DMV approach needs it")
         c.close()

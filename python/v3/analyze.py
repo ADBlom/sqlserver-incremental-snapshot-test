@@ -36,7 +36,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from analysis_core import (build_index, check_observation, pct, build_lsn_of,
-                           check_lower, check_upper, build_series, delay_until)
+                           check_lower, check_upper, build_series, delay_until, same_replica)
 from common import add_conn_args, connect
 
 
@@ -151,6 +151,7 @@ def main():
     all_violations = []
     all_dmv_lower_violations = []
     all_dmv_upper_violations = []
+    replica_affinity_violations = []
     report = {}
     for mode, paths in sorted(by_mode.items()):
         c = Counter()
@@ -165,6 +166,18 @@ def main():
                     prev_low = None
                     continue
                 c["obs"] += 1
+                replica_pre = obs.get("replica_pre")
+                replica_chunk = obs.get("replica_chunk")
+                replica_post = obs.get("replica_post")
+                if all(replica is not None for replica in (replica_pre, replica_chunk, replica_post)):
+                    c["replica_identity_checked"] += 1
+                    if not same_replica(replica_pre, replica_chunk) or not same_replica(
+                            replica_chunk, replica_post):
+                        c["replica_affinity_violations"] += 1
+                        replica_affinity_violations.append(
+                            {"mode": mode, "t": obs["t"], "replica_pre": replica_pre,
+                             "replica_chunk": replica_chunk,
+                             "replica_post": replica_post})
                 res = check_observation(obs, idx, n_ids)
                 if res["null_lsn"]:
                     c["null_lsn"] += 1
@@ -256,6 +269,9 @@ def main():
         n = max(1, c.get("obs", 0) - c.get("errors", 0))
         print(f"\n[{mode}]  observations={c.get('obs', 0)}  connection_errors={c.get('errors', 0)}  "
               f"null_lsn={c.get('null_lsn', 0)}")
+        if c.get("replica_identity_checked"):
+            print(f"  replica-affinity violations: {c.get('replica_affinity_violations', 0)} / "
+                  f"{c['replica_identity_checked']} position/chunk identity triplets")
         print(f"  LOWER-BOUND VIOLATIONS: {c.get('obs_with_violation', 0)} observations "
               f"({c.get('violating_rows', 0)} rows)   <-- the safety property")
         print(f"  coverage: rows checked={c.get('rows_checked', 0)}, "
@@ -296,6 +312,13 @@ def main():
                   f"pre-v3 log format?)")
 
     total_viol = len(all_violations)
+    if replica_affinity_violations:
+        print("\n" + "=" * 78)
+        print(f"*** {len(replica_affinity_violations)} replica-affinity violations: the watermark and "
+              "chunk-read identity differed for an observation.")
+        for v in replica_affinity_violations[:args.max_print]:
+            print(f"  [{v['mode']}] t={v['t']:.3f} before={v['replica_pre']} "
+                  f"chunk={v['replica_chunk']} after={v['replica_post']}")
     print("\n" + "=" * 78)
     if total_viol:
         print(f"*** {total_viol} violating (observation,row) pairs. First {args.max_print}:")
@@ -362,10 +385,12 @@ def main():
         {"modes": report, "violations": all_violations[:500],
          "dmv_lower_violations": all_dmv_lower_violations[:500],
          "dmv_upper_violations": all_dmv_upper_violations[:500],
+         "replica_affinity_violations": replica_affinity_violations[:500],
          "completeness_ok": completeness_ok, "missing_pairs": missing[:50], "chaos": chaos,
          "quiet_period_final": watcher_records[-1] if watcher_records else None}, indent=2))
     print(f"\nWrote {run_dir / 'report.json'}")
-    return 1 if (total_viol or total_dmv_lower_viol or total_dmv_upper_viol or not completeness_ok) else 0
+    return 1 if (total_viol or total_dmv_lower_viol or total_dmv_upper_viol
+                  or replica_affinity_violations or not completeness_ok) else 0
 
 
 if __name__ == "__main__":

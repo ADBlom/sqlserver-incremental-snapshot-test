@@ -30,12 +30,30 @@ assert check_observation({"v": [0, 0], "l_low": None}, idx, 2)["null_lsn"]
 print("analysis_core tests passed")
 
 # ---------------- v3: DMV helpers ----------------
-from analysis_core import lsn_numeric_to_hex, build_lsn_of, check_lower, check_upper, build_series, delay_until
+from analysis_core import (lsn_numeric_to_hex, build_lsn_of, check_lower, check_upper,
+                           build_series, delay_until, same_replica)
 
 # lsn_numeric_to_hex round-trips against the same VLF/offset/slot values CDC would encode
 n = 12 * 10**15 + 34 * 10**5 + 56
 assert lsn_numeric_to_hex(n) == f"{12:08x}{34:08x}{56:04x}"
 assert lsn_numeric_to_hex(None) is None
+max_lsn_numeric = 0xFFFFFFFF * 10**15 + 0xFFFFFFFF * 10**5 + 0xFFFF
+assert lsn_numeric_to_hex(max_lsn_numeric) == "ffffffffffffffffffff"
+for invalid_lsn in (-1, 0x100000000 * 10**15,
+                    0xFFFFFFFF * 10**15 + 0x100000000 * 10**5,
+                    0xFFFF + 1):
+    try:
+        lsn_numeric_to_hex(invalid_lsn)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"accepted invalid numeric LSN: {invalid_lsn}")
+
+replica = {"server": "node2", "database_id": 7, "replica_id": "replica-guid"}
+assert same_replica(replica, dict(replica))
+assert not same_replica(replica, {**replica, "server": "node1"})
+assert not same_replica(replica, {**replica, "replica_id": "other-guid"})
+assert not same_replica(replica, None)
 
 lsn_of = build_lsn_of(ct)   # reuse `ct` from above: [(1,1,L(10)), (1,2,L(30)), (1,2,L(30)), (2,1,L(20)), (2,3,L(50))]
 assert lsn_of[(1, 1)] == L(10) and lsn_of[(2, 3)] == L(50)

@@ -39,14 +39,31 @@ def fetch_lsn(cur):
 
 
 POS_SQL = (
-    "SELECT sys.fn_cdc_get_max_lsn(), drs.last_commit_lsn, drs.last_redone_lsn "
+    "SELECT @@SERVERNAME, DB_ID(), CONVERT(varchar(36), drs.replica_id), "
+    "sys.fn_cdc_get_max_lsn(), drs.last_commit_lsn, drs.last_redone_lsn "
     "FROM sys.dm_hadr_database_replica_states AS drs "
     "WHERE drs.database_id = DB_ID() AND drs.is_local = 1"
 )
 
 
+def fetch_replica(cur):
+    cur.execute(
+        "SELECT @@SERVERNAME, DB_ID(), CONVERT(varchar(36), drs.replica_id) "
+        "FROM sys.dm_hadr_database_replica_states AS drs "
+        "WHERE drs.database_id = DB_ID() AND drs.is_local = 1"
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("no local row in sys.dm_hadr_database_replica_states for this database")
+    return {
+        "server": row[0],
+        "database_id": row[1],
+        "replica_id": str(row[2]) if row[2] is not None else None,
+    }
+
+
 def fetch_pos(cur):
-    """One statement, three positions, all as binary(10)-style hex:
+    """One statement reads local identity and three positions; LSNs are binary(10)-style hex:
        l  = CDC max LSN (fn_cdc_get_max_lsn)
        dc = DMV last_commit_lsn  (on a secondary: last commit record redone)
        dr = DMV last_redone_lsn  (last log record redone)"""
@@ -54,5 +71,14 @@ def fetch_pos(cur):
     row = cur.fetchone()
     if row is None:
         raise RuntimeError("no local row in sys.dm_hadr_database_replica_states for this database")
-    l = row[0].hex() if row[0] is not None else None
-    return {"l": l, "dc": lsn_numeric_to_hex(row[1]), "dr": lsn_numeric_to_hex(row[2])}
+    l = row[3].hex() if row[3] is not None else None
+    return {
+        "l": l,
+        "dc": lsn_numeric_to_hex(row[4]),
+        "dr": lsn_numeric_to_hex(row[5]),
+        "replica": {
+            "server": row[0],
+            "database_id": row[1],
+            "replica_id": str(row[2]) if row[2] is not None else None,
+        },
+    }

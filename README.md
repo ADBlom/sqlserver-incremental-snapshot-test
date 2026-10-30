@@ -102,3 +102,38 @@ timestamps so you can correlate them back into `writer_log.jsonl` /
   primary at all" as expected latency, not a violation, since that's a timing artifact
   of when you happened to run the analysis, not the ordering property under test.
   Re-run `analyze.py` a little later if that count looks high.
+
+## Focused DMV watermark validation (v3)
+
+The v3 harness also checks DMV lower/upper bounds around its snapshot reads and
+records the SQL Server replica identity before the transaction, during the chunk
+read, and after commit. From `python/v3`, run
+`python3 analyze.py <run-directory>` after a v3 workload; the analyzer reports
+and fails on any observation whose watermark and chunk read came from different
+replica identities.
+
+To test the open question about commits to a table that is not CDC-enabled, run this bounded probe against a test AG database:
+
+```bash
+cd python/v3
+python3 probe_non_cdc_catchup.py --timeout 60
+```
+
+The probe records SQL Server version, edition, AG mode, replica identities, the secondary DMV position, and whether `fn_cdc_get_max_lsn()` reaches the first observed `last_commit_lsn` after a marker commit to `dbo.watermark_probe_non_cdc`. It creates that table on the primary if needed and leaves the marker row in place. Exit status `0` means CDC reached the target within the timeout; `2` means it did not or the target was not observed in time. A timeout is evidence to design a bounded/alternative close-window behavior, not proof that CDC will never catch up.
+
+Run the probe and the v3 analyzer against each SQL Server version and AG topology being evaluated. For separate host names, use `--primary-host` and `--secondary-host`; the usual `--primary-port`, `--secondary-port`, `--database`, and `--encrypt` options are also available. The pure-Python tests cover numeric-to-binary LSN component boundaries and replica-identity comparisons:
+
+```bash
+python3 test_analysis_core.py
+```
+
+These tests validate the watermark prerequisites, not the connector's end-to-end chunk reconciliation flow.
+
+## V4: low-activity CDC progress probe
+
+For the specific question of whether CDC advances during a quiet period after a
+non-CDC-table commit, see [`python/v4/README.md`](python/v4/README.md). The v4
+probe samples CDC progress and capture diagnostics on the primary together with
+the CDC and HADR positions on the readable secondary. It also documents a
+focused exploratory test of whether capture-agent transaction commits can act
+as scan-boundary evidence.

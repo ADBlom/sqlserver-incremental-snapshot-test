@@ -79,7 +79,21 @@ def lsn_numeric_to_hex(n):
     if n is None:
         return None
     n = int(n)
-    return f"{n // 10**15:08x}{(n // 10**5) % 10**10:08x}{n % 10**5:04x}"
+    if n < 0:
+        raise ValueError("LSN numeric value must not be negative")
+    vlf = n // 10**15
+    block = (n // 10**5) % 10**10
+    slot = n % 10**5
+    if vlf > 0xFFFFFFFF or block > 0xFFFFFFFF or slot > 0xFFFF:
+        raise ValueError(f"LSN numeric value is outside the binary(10) component ranges: {n}")
+    return f"{vlf:08x}{block:08x}{slot:04x}"
+
+
+def same_replica(before, after):
+    """Whether two position reads identify the same server, database, and AG replica."""
+    keys = ("server", "database_id", "replica_id")
+    return bool(before and after and all(before.get(k) is not None for k in keys)
+                and all(before.get(k) == after.get(k) for k in keys))
 
 
 def build_lsn_of(ct_rows):
